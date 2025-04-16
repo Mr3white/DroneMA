@@ -1,3 +1,4 @@
+import random
 from config import config
 from data_processing import create_dataloader
 from model import R2DGRU
@@ -10,12 +11,21 @@ if __name__ == "__main__":
     create_dirs(config.model_save_path, config.results_save_path)
     
     # 获取数据
-    train_files = get_files('../data/positive')
-    test_files = get_files('../data/negtive')
-    
-    # 创建数据加载器
-    train_loader = create_dataloader(train_files, config.train_window, config.batch_size)
-    test_loader = create_dataloader(test_files, config.train_window, config.batch_size)
+    all_positive_files = get_files('../data/positive')
+
+    random.shuffle(all_positive_files)
+
+    split_index = len(all_positive_files) // 2
+
+    train_files = all_positive_files[:split_index] # First half for training
+    val_files = all_positive_files[split_index:]
+
+    print(f"Total positive files: {len(all_positive_files)}")
+    print(f"Number of training files: {len(train_files)}")
+    print(f"Number of validation files: {len(val_files)}")
+
+    train_loader = create_dataloader(train_files, config.train_window, config.batch_size) 
+    val_loader = create_dataloader(val_files, config.train_window, config.batch_size)
     
     # 初始化模型
     model = R2DGRU(input_size=1, 
@@ -24,4 +34,6 @@ if __name__ == "__main__":
                       model_type=config.model_type)
     
     # 训练模型
-    trained_model = train_model(model, train_loader, test_loader, config)
+    trained_model = train_model(model, train_loader, val_loader, config) 
+
+    
