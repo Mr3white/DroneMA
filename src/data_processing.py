@@ -1,52 +1,98 @@
+# data_processing.py
 import torch
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
-from filterpy.kalman import KalmanFilter
+import os # Added for file existence check
 
 class RSSIDataset(Dataset):
-    def __init__(self, processed_data):
-        self.processed_data = processed_data
+    """ Custom Dataset for RSSI sequences. """
+    def __init__(self, processed_data_list):
+        # Expects a list of tuples, where each tuple is (rssi_array, dist_array)
+        self.processed_data = processed_data_list
 
     def __len__(self):
         return len(self.processed_data)
 
     def __getitem__(self, idx):
-        rssi, dist = self.processed_data[idx]
-        return rssi.clone().detach().view(-1, 1), dist.clone().detach().view(-1, 1)
+        # Gets the tuple of numpy arrays for the index
+        rssi_np, dist_np = self.processed_data[idx]
+        # Convert numpy arrays to tensors here
+        # Ensure they are float32 as commonly expected by models
+        rssi_tensor = torch.tensor(rssi_np, dtype=torch.float32)
+        dist_tensor = torch.tensor(dist_np, dtype=torch.float32)
+        # Reshape to (sequence_length, 1) as often needed for RNNs/Transformers
+        return rssi_tensor.view(-1, 1), dist_tensor.view(-1, 1)
 
-def apply_kalman_filter(rssi_values, R=1, Q=1):
-    kf = KalmanFilter(dim_x=1, dim_z=1)
-    kf.x = np.array([rssi_values.iloc[0]])
-    kf.F = np.array([[1]]) 
-    kf.H = np.array([[1]])
-    kf.P *= 1000
-    kf.R = R
-    kf.Q = Q
+def preprocess_data(data_df, window_length):
+    """Preprocesses data from a single DataFrame using windowing (no Kalman)."""
+    if 'rssi' not in data_df.columns or 'dist' not in data_df.columns:
+        # Or handle cases where only 'rssi' might be needed if dist is not always present
+        raise ValueError("Input DataFrame must contain 'rssi' and 'dist' columns.")
 
-    filtered_rssi = []
-    for rssi in rssi_values:
-        kf.predict()
-        kf.update(rssi)
-        filtered_rssi.append(kf.x[0])
-    return filtered_rssi
+    processed_data_tuples = []
+    # Check length before iterating
+    if len(data_df) < window_length:
+        return [] # Skip files shorter than window length
 
-def preprocess_data(data, window_length):
-    data['filtered_rssi'] = apply_kalman_filter(data['rssi'])
-    processed_data = []
-    for start_index in range(len(data) - window_length + 1):
+    # Use .iloc for potentially non-integer index, ensure values are numpy arrays
+    rssi_values = data_df['rssi'].values
+    dist_values = data_df['dist'].values
+
+    for start_index in range(len(data_df) - window_length + 1):
         end_index = start_index + window_length
-        window_rssi = data['rssi'][start_index:end_index].values
-        actual_dist = data['dist'][start_index:end_index].values
-        processed_data.append((window_rssi, actual_dist))
-    return processed_data
+        # Slice numpy arrays directly
+        window_rssi = rssi_values[start_index:end_index]
+        actual_dist = dist_values[start_index:end_index]
+        processed_data_tuples.append((window_rssi, actual_dist))
+    return processed_data_tuples
 
-def create_dataloader(files, window_length, batch_size=128):
-    processed_data = []
+def _create_dataloader_base(files, window_length, batch_size, shuffle):
+    """Base function for creating dataloaders."""
+    all_processed_tuples = []
+    print(f"  Preprocessing {len(files)} files for dataloader (shuffle={shuffle})...")
+    count = 0
     for file in files:
-        data = pd.read_csv(file)
-        processed = preprocess_data(data, window_length)
-        processed_data.extend(processed)
-    
-    dataset = RSSIDataset(torch.tensor(np.array(processed_data), dtype=torch.float32))
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        count += 1
+        # print(f"    Processing file {count}/{len(files)}: {file}") # Verbose logging
+        try:
+            # Check existence before reading
+            if not os.path.exists(file):
+                 print(f"    Warning: File not found, skipping: {file}")
+                 continue
+            data = pd.read_csv(file)
+            # Check if data is empty or missing required columns
+            if data.empty or not {'rssi', 'dist'}.issubset(data.columns):
+                 print(f"    Warning: Skipping file {file} (empty or missing 'rssi'/'dist').")
+                 continue
+
+            processed_tuples = preprocess_data(data, window_length)
+            all_processed_tuples.extend(processed_tuples)
+        except pd.errors.EmptyDataError:
+             print(f"    Warning: Skipping empty CSV file: {file}")
+        except Exception as e:
+            print(f"    Error processing file {file}: {e}")
+            # import traceback # Uncomment for detailed debugging
+            # traceback.print_exc() # Uncomment for detailed debugging
+
+    if not all_processed_tuples:
+         print("  Warning: No data loaded after preprocessing all files. Dataloader will be empty.")
+         # Return an empty DataLoader consistent with expected output type
+         return DataLoader(RSSIDataset([]), batch_size=batch_size, shuffle=shuffle)
+
+    print(f"  Created {len(all_processed_tuples)} sequences.")
+    # *** CORRECTED: Pass the list of tuples directly to the Dataset ***
+    dataset = RSSIDataset(all_processed_tuples)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+
+# Dataloader function for training (shuffle=True)
+def create_train_dataloader(files, window_length, batch_size=128):
+    """Creates a DataLoader for training (shuffle=True)."""
+    # This directly calls the base function with shuffle=True
+    return _create_dataloader_base(files, window_length, batch_size, shuffle=True)
+
+# Dataloader function for testing/validation (shuffle=False)
+def create_eval_dataloader(files, window_length, batch_size=128):
+    """Creates a DataLoader for evaluation/testing (shuffle=False)."""
+    # This directly calls the base function with shuffle=False
+    return _create_dataloader_base(files, window_length, batch_size, shuffle=False)
