@@ -1,4 +1,12 @@
 import torch.nn as nn
+import torch
+
+class ExponentialLayer(nn.Module):
+    def __init__(self):
+        super(ExponentialLayer, self).__init__()
+
+    def forward(self, x):
+        return torch.exp(x * torch.log(torch.tensor(10.0)))
 
 class R2DGRU(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, model_type='gru'):
@@ -13,7 +21,7 @@ class R2DGRU(nn.Module):
             
         self.fc = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
+            ExponentialLayer(),
             nn.Linear(hidden_size, output_size)
         )
 
