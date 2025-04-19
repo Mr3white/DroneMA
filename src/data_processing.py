@@ -92,7 +92,7 @@ def create_train_dataloader(files, window_length, batch_size=128):
     return _create_dataloader_base(files, window_length, batch_size, shuffle=True)
 
 # Dataloader function for testing/validation (shuffle=False)
-def create_eval_dataloader(files, window_length, batch_size=128):
+def create_eval_dataloader(files, window_length, batch_size=1):
     """Creates a DataLoader for evaluation/testing (shuffle=False)."""
     # This directly calls the base function with shuffle=False
     return _create_dataloader_base(files, window_length, batch_size, shuffle=False)

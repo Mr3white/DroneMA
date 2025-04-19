@@ -3,7 +3,7 @@ import torch
 class Config:
     seed = 10086
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    num_epochs = 20
+    num_epochs = 40
     train_window = 60
     model_type = 'gru'
     batch_size = 128
