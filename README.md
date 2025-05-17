@@ -1,2 +1,1 @@
 # DroneMA
-Coming soon.
